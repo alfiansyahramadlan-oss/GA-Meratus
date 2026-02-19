@@ -787,12 +787,16 @@
         if(id === 'dashboard') renderDashboard();
     }
 
-    function updatePekerja() {
-        const tim = document.getElementById('tim').value;
-        const n = document.getElementById('nama');
-        n.innerHTML = '<option value="">-- Pilih Nama --</option>';
-        if(tim) timData[tim].forEach(p => n.innerHTML += `<option value="${p}">${p}</option>`);
+function updatePekerja() {
+    const tim = document.getElementById('tim').value;
+    const n = document.getElementById('nama');
+    n.innerHTML = '<option value="">-- Pilih Nama --</option>'; // Reset pilihan
+    if(tim && timData[tim]) {
+        timData[tim].forEach(p => {
+            n.innerHTML += `<option value="${p}">${p}</option>`;
+        });
     }
+}
 
     function openFinishModal(id) { selectedTaskId = id; document.getElementById('modalFinish').style.display = 'block'; }
     function closeModal() { document.getElementById('modalFinish').style.display = 'none'; }
@@ -810,3 +814,4 @@
 </body>
 
 </html>
+
