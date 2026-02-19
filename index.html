@@ -433,101 +433,132 @@
 </nav>
 
 <script>
+    // ==========================================
+    // 1. KONFIGURASI PUSAT DATA (CLOUD)
+    // ==========================================
+    const SCRIPT_URL = https://alfiansyahramadlan-oss.github.io/GA-Meratus/; 
+
     const timData = { "ME": ["Heru", "Heri", "Dayat", "Bedjo", "Ribut"], "BUILDING": ["Mustaman", "Jamzadi", "Kartono", "Yoyok", "Kasnadi", "Sukandar"] };
     let currentLogs = [];
     let selectedTaskId = null;
     let base64Cek = "";
     let base64Selesai = "";
     let timerIntervals = {};
+    
+    // Variabel Global untuk menampung data dari Cloud
+    let db_tasks = [];
+    let db_requests = [];
 
-    // --- FITUR REQUEST ---
-    function saveRequest() {
+    // Fungsi Loading Overlay (Gunakan ID ini jika ada di HTML, jika tidak abaikan)
+    function showLoading(show) {
+        const loader = document.getElementById('loadingOverlay');
+        if(loader) loader.style.display = show ? 'flex' : 'none';
+    }
+
+    // ==========================================
+    // 2. FUNGSI SYNC DATA (AMBIL DARI CLOUD)
+    // ==========================================
+    async function loadAllData() {
+        showLoading(true);
+        try {
+            const response = await fetch(SCRIPT_URL);
+            const data = await response.json();
+            
+            // Pisahkan data berdasarkan Sheet
+            db_tasks = data.tasks || [];
+            db_requests = data.requests || [];
+            
+            renderRequests();
+            renderDashboard();
+        } catch (e) {
+            console.error("Gagal sinkronisasi data cloud:", e);
+        }
+        showLoading(false);
+    }
+
+    // ==========================================
+    // 3. FITUR REQUEST (MODIFIED FOR CLOUD)
+    // ==========================================
+    async function saveRequest() {
         const nama = document.getElementById('req_nama').value;
         const masalah = document.getElementById('req_masalah').value;
         if(!nama || !masalah) return alert("Lengkapi data request!");
 
-        const newRequest = {
+        showLoading(true);
+        const payload = {
+            action: "insert_request",
             id: Date.now(),
             nama: nama,
-            masalah: masalah,
-            status: 'Request'
+            masalah: masalah
         };
 
-        let reqDb = JSON.parse(localStorage.getItem('meratus_request_db')) || [];
-        reqDb.push(newRequest);
-        localStorage.setItem('meratus_request_db', JSON.stringify(reqDb));
-        
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+
         document.getElementById('req_nama').value = "";
         document.getElementById('req_masalah').value = "";
-        renderRequests();
-        alert("Request berhasil disimpan ke list!");
+        alert("Request tersimpan di Cloud!");
+        await loadAllData();
     }
 
- function renderRequests() {
-    const reqDb = JSON.parse(localStorage.getItem('meratus_request_db')) || [];
-    const container = document.getElementById('listRequestContainer');
-    container.innerHTML = "";
+    function renderRequests() {
+        const container = document.getElementById('listRequestContainer');
+        if(!container) return;
+        container.innerHTML = "";
 
-    if(reqDb.length === 0) {
-        container.innerHTML = "<p style='text-align:center; color:#ccc; font-size:0.8rem;'>Tidak ada request pekerjaan.</p>";
-        return;
+        if(db_requests.length === 0) {
+            container.innerHTML = "<p style='text-align:center; color:#ccc; font-size:0.8rem;'>Tidak ada request pekerjaan.</p>";
+            return;
+        }
+
+        db_requests.slice().reverse().forEach(r => {
+            container.innerHTML += `
+                <div class="request-item-small">
+                    <div class="request-info">
+                        <div style="font-weight: bold; color: var(--meratus-navy);">${r.masalah}</div>
+                        <div style="font-size: 0.7rem; color: #888;">Dari: ${r.nama}</div>
+                    </div>
+                    <div class="request-actions">
+                        <button class="btn btn-execute btn-small" onclick="executeRequest('${r.id}')">⚡ EKSEKUSI</button>
+                        <button class="btn-tool btn-small" style="color:red; border:none;" onclick="hapusRequest('${r.id}')">🗑️</button>
+                    </div>
+                </div>`;
+        });
     }
 
-    reqDb.slice().reverse().forEach(r => {
-        container.innerHTML += `
-            <div class="request-item-small">
-                <div class="request-info">
-                    <div style="font-weight: bold; color: var(--meratus-navy);">${r.masalah}</div>
-                    <div style="font-size: 0.7rem; color: #888;">Dari: ${r.nama}</div>
-                </div>
-                <div class="request-actions">
-                    <button class="btn btn-execute btn-small" onclick="executeRequest(${r.id})">⚡ EKSEKUSI</button>
-                    <button class="btn-tool btn-small" style="color:red; border:none;" onclick="if(confirm('Apakah Anda yakin ingin menghapus request ini?')) hapusRequest(${r.id})">🗑️</button>
-                </div>
-            </div>
-        `;
-    });
-}
-
-    function executeRequest(id) {
-        const reqDb = JSON.parse(localStorage.getItem('meratus_request_db')) || [];
-        const target = reqDb.find(x => x.id === id);
+    async function executeRequest(id) {
+        const target = db_requests.find(x => x.id == id);
+        if(!target) return;
         document.getElementById('masalah').value = `[REQ: ${target.nama}] ${target.masalah}`;
         switchTab('input', document.querySelectorAll('.nav-item')[1]);
-        hapusRequest(id);
-        alert("Data request telah ditarik ke form input.");
+        
+        // Hapus dari cloud setelah ditarik
+        showLoading(true);
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "delete_request", id: id })
+        });
+        await loadAllData();
     }
 
-    function hapusRequest(id) {
-        let reqDb = JSON.parse(localStorage.getItem('meratus_request_db')) || [];
-        reqDb = reqDb.filter(x => x.id !== id);
-        localStorage.setItem('meratus_request_db', JSON.stringify(reqDb));
-        renderRequests();
+    async function hapusRequest(id) {
+        if(!confirm('Hapus request ini?')) return;
+        showLoading(true);
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "delete_request", id: id })
+        });
+        await loadAllData();
     }
 
-
-    // --- FUNGSI UTAMA ---
-    function switchTab(id, el) {
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        document.getElementById('tab-' + id).classList.add('active');
-        el.classList.add('active');
-        if(id === 'dashboard') renderDashboard();
-        if(id === 'request') renderRequests();
-    }
-
-    function updatePekerja() {
-        const tim = document.getElementById('tim').value;
-        const n = document.getElementById('nama');
-        n.innerHTML = '<option value="">-- Pilih Nama --</option>';
-        if(tim) timData[tim].forEach(p => n.innerHTML += `<option value="${p}">${p}</option>`);
-    }
-
-    // --- FUNGSI KOMPRESI GAMBAR (Target 100KB) ---
+    // ==========================================
+    // 4. FUNGSI KOMPRESI GAMBAR (TETAP SAMA)
+    // ==========================================
     function processImage(input, targetId) {
         const file = input.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = function (event) {
@@ -537,391 +568,245 @@
                 const canvas = document.createElement('canvas');
                 let width = img.width;
                 let height = img.height;
-                
-                // Max resolusi ditingkatkan ke 1024 agar tetap layak baca
                 const max_size = 1024; 
                 if (width > height) {
                     if (width > max_size) { height *= max_size / width; width = max_size; }
                 } else {
                     if (height > max_size) { width *= max_size / height; height = max_size; }
                 }
-
                 canvas.width = width;
                 canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-
-                // Algoritma Iteratif untuk mencapai target ~100KB
                 let quality = 0.8;
                 let dataUrl = canvas.toDataURL('image/jpeg', quality);
-                
-                // Jika hasil masih di atas 100KB, turunkan kualitas bertahap
-                // (Size base64 adalah ~1.33x dari size asli byte)
                 while ((dataUrl.length * 0.75) > 102400 && quality > 0.1) {
                     quality -= 0.1;
                     dataUrl = canvas.toDataURL('image/jpeg', quality);
                 }
-
                 const preview = document.getElementById(targetId);
                 preview.src = dataUrl;
                 preview.style.display = 'block';
-                
                 if(targetId === 'prevCek') base64Cek = dataUrl;
                 else base64Selesai = dataUrl;
-
-                const sizeKB = Math.round((dataUrl.length * 0.75) / 1024);
-                console.log(`Compressed to: ${sizeKB} KB (Quality: ${quality.toFixed(2)})`);
             };
         };
     }
 
+    // ==========================================
+    // 5. FUNGSI UTAMA (MODIFIED FOR CLOUD)
+    // ==========================================
     function simpanCek() {
         const note = document.getElementById('hasilCek').value;
         if(!note) return alert("Isi detail temuan!");
-        currentLogs.push({ time: new Date().toLocaleString(), note: note });
+        currentLogs.push({ time: new Date().toLocaleString('id-ID'), note: note });
         document.getElementById('tempLog').innerText = `✅ Berhasil mencatat ${currentLogs.length} temuan.`;
         document.getElementById('actionBtns').style.display = 'flex';
         document.getElementById('hasilCek').value = "";
     }
 
-    function submitTask(status) {
+    async function submitTask(status) {
         const m = document.getElementById('masalah').value;
         const tim = document.getElementById('tim').value;
         const n = document.getElementById('nama').value;
         if(!m || !n || !tim) return alert("Lengkapi data!");
 
-        const now = new Date();
-        const newTask = {
+        showLoading(true);
+        const payload = {
+            action: "insert_task",
             id: Date.now(),
             masalah: m,
             pekerja: n + " (" + tim + ")",
             status: status,
-            riwayat: [...currentLogs],
+            riwayat: JSON.stringify(currentLogs),
             fotoCek: base64Cek,
-            fotoSelesai: "",
-            waktuInput: now.toISOString(),
-            waktuMulai: status === 'In Progress' ? now.toISOString() : null,
-            waktuSelesai: null,
-            keteranganSelesai: "" 
+            waktuInput: new Date().toISOString(),
+            waktuMulai: status === 'In Progress' ? new Date().toISOString() : null
         };
 
-        let db = JSON.parse(localStorage.getItem('meratus_db_v4')) || [];
-        db.push(newTask);
-        localStorage.setItem('meratus_db_v4', JSON.stringify(db));
-        alert("Data berhasil dikirim!");
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+
+        alert("Data terkirim ke Cloud!");
         location.reload();
     }
 
+    async function updateStatus(id, newStatus) {
+        showLoading(true);
+        const payload = {
+            action: "update_status",
+            id: id,
+            status: newStatus,
+            waktuMulai: newStatus === 'In Progress' ? new Date().toISOString() : null
+        };
+        await fetch(SCRIPT_URL, { method: "POST", body: JSON.stringify(payload) });
+        await loadAllData();
+    }
+
+    async function confirmFinish() {
+        if(!base64Selesai) return alert("Harap upload foto hasil kerja!");
+        showLoading(true);
+        const payload = {
+            action: "finish_task",
+            id: selectedTaskId,
+            status: 'Selesai',
+            waktuSelesai: new Date().toISOString(),
+            fotoSelesai: base64Selesai,
+            keteranganSelesai: document.getElementById('ketSelesai').value
+        };
+        await fetch(SCRIPT_URL, { method: "POST", body: JSON.stringify(payload) });
+        if(timerIntervals[selectedTaskId]) clearInterval(timerIntervals[selectedTaskId]);
+        closeModal();
+        await loadAllData();
+    }
+
+    async function hapusData(id) {
+        if(!confirm("Hapus data ini dari Cloud?")) return;
+        showLoading(true);
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "delete_task", id: id })
+        });
+        if(timerIntervals[id]) clearInterval(timerIntervals[id]);
+        await loadAllData();
+    }
+
+    // ==========================================
+    // 6. DASHBOARD & RENDER (TETAP SAMA LOGIKANYA)
+    // ==========================================
+    function renderDashboard() {
+        const query = document.getElementById('searchInput').value.toLowerCase();
+        
+        document.getElementById('stat-pending').innerText = db_tasks.filter(x => x.status === 'Pending').length;
+        document.getElementById('stat-progress').innerText = db_tasks.filter(x => x.status === 'In Progress').length;
+        document.getElementById('stat-done').innerText = db_tasks.filter(x => x.status === 'Selesai').length;
+
+        const containerAktif = document.getElementById('listAktif');
+        const containerDone = document.getElementById('listDone');
+        containerAktif.innerHTML = "";
+        containerDone.innerHTML = "";
+
+        const filteredData = db_tasks.filter(t => 
+            !query || t.masalah.toLowerCase().includes(query) || t.pekerja.toLowerCase().includes(query)
+        ).sort((a, b) => new Date(b.waktuInput) - new Date(a.waktuInput));
+
+        filteredData.forEach(t => {
+            const html = createCompactHTML(t);
+            if(t.status === 'Selesai') {
+                containerDone.innerHTML += html;
+            } else {
+                containerAktif.innerHTML += html;
+                if(t.status === 'In Progress' && t.waktuMulai) {
+                    setTimeout(() => { startLiveTimer(t.id, t.waktuMulai); }, 50);
+                }
+            }
+        });
+    }
+
+    // Fungsi Helper untuk HTML Card (Menggunakan struktur kamu)
+    function createCompactHTML(t) {
+        const badgeClass = t.status === 'Pending' ? 'badge-pending' : (t.status === 'In Progress' ? 'badge-progress' : 'badge-done');
+        
+        // Parsing riwayat dari JSON string jika dari cloud
+        let riwayatArr = [];
+        try { riwayatArr = typeof t.riwayat === 'string' ? JSON.parse(t.riwayat) : t.riwayat; } catch(e) { riwayatArr = []; }
+
+        const listTemuan = riwayatArr && riwayatArr.length > 0 
+            ? riwayatArr.map(r => `<div style="margin-bottom:2px;">• <span class="time-value">${r.time}</span>: ${r.note}</div>`).join("") 
+            : "<span style='color:#ccc'>Tidak ada detail temuan</span>";
+
+        const startTimeStr = t.waktuMulai ? new Date(t.waktuMulai).toLocaleString('id-ID').replace(/\./g, ':') : '-';
+
+        return `
+            <div class="compact-card">
+                <div class="compact-header">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 800; color: var(--meratus-navy); font-size: 0.9rem; line-height:1.2;">${t.masalah}</div>
+                        <div style="font-size: 0.7rem; color: #666; margin-top:2px;">👷 ${t.pekerja}</div>
+                    </div>
+                    <span class="status-badge ${badgeClass}" style="font-size:0.6rem; padding: 2px 8px;">${t.status}</span>
+                </div>
+                <div class="compact-content">
+                    <div class="info-box box-temuan" style="margin-bottom:4px;">
+                        <strong style="font-size:0.6rem; color:#888; display:block;">DETAIL TEMUAN:</strong>
+                        <div style="font-size:0.75rem; line-height:1.4;">${listTemuan}</div>
+                    </div>
+                    ${t.status === 'Selesai' ? `<div class="info-box box-hasil" style="margin-bottom:4px;">
+                        <strong style="font-size:0.6rem; color:#2e7d32; display:block;">HASIL KERJA:</strong>
+                        <div style="font-size:0.75rem;">${t.keteranganSelesai || '-'}</div>
+                    </div>` : ''}
+                    <div class="compact-grid-info">
+                        <div style="margin-bottom: 2px;"><span class="time-label">MULAI:</span> <span class="time-value">${startTimeStr}</span></div>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div><span class="time-label">DURASI:</span> <span id="timer-${t.id}" class="${t.status === 'In Progress' ? 'timer-running' : 'time-value'}">
+                                ${t.status === 'Selesai' ? calculateDuration(t.waktuMulai, t.waktuSelesai) : '0j 0m 0s'}
+                            </span></div>
+                            <div style="display:flex; gap:8px;">
+                                ${t.fotoCek ? `<span onclick="viewImg('${t.fotoCek}')" style="cursor:pointer; font-size:0.7rem; color:var(--accent); font-weight:bold;">🖼️ CEK</span>` : ''}
+                                ${t.fotoSelesai ? `<span onclick="viewImg('${t.fotoSelesai}')" style="cursor:pointer; font-size:0.7rem; color:var(--success); font-weight:bold;">🖼️ HASIL</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:4px; margin-top:8px; border-top: 1px solid #eee; padding-top:8px;">
+                    ${t.status === 'Pending' ? `<button class="btn-tool" style="flex:1; background:var(--meratus-navy); color:white;" onclick="updateStatus('${t.id}', 'In Progress')">MULAI SEKARANG</button>` : ''}
+                    ${t.status === 'In Progress' ? `<button class="btn-tool" style="flex:1; background:var(--meratus-red); color:white" onclick="openFinishModal('${t.id}')">SELESAI</button>` : ''}
+                    <button class="btn-tool" style="width:35px; color:#ccc;" onclick="hapusData('${t.id}')">🗑️</button>
+                </div>
+            </div>`;
+    }
+
+    // ==========================================
+    // 7. UTILITY & TIMER (TETAP SAMA)
+    // ==========================================
     function calculateDuration(start, end) {
-        if(!start || !end) return "-";
-        const d1 = new Date(start);
-        const d2 = new Date(end);
-        const diff = Math.abs(d2 - d1);
+        if(!start || !end) return "0j 0m 0s";
+        const diff = Math.abs(new Date(end) - new Date(start));
         const hours = Math.floor(diff / 3600000);
         const minutes = Math.floor((diff % 3600000) / 60000);
         const seconds = Math.floor((diff % 60000) / 1000);
         return `${hours}j ${minutes}m ${seconds}s`;
     }
 
-function startLiveTimer(taskId, startTime) {
-    if(timerIntervals[taskId]) clearInterval(timerIntervals[taskId]);
-    
-    timerIntervals[taskId] = setInterval(() => {
-        const el = document.getElementById(`timer-${taskId}`);
-        if(el) {
-            // Menggunakan fungsi calculateDuration yang sudah ada di file Anda
-            el.innerText = calculateDuration(startTime, new Date());
-        } else {
-            // Hentikan interval jika elemen sudah tidak ada di layar (misal pindah tab)
-            clearInterval(timerIntervals[taskId]);
-        }
-    }, 1000);
-}
-
-    function renderDashboard() {
-    const db = JSON.parse(localStorage.getItem('meratus_db_v4')) || [];
-    const query = document.getElementById('searchInput').value.toLowerCase();
-    
-    // 1. Update Statistik Atas
-    document.getElementById('stat-pending').innerText = db.filter(x => x.status === 'Pending').length;
-    document.getElementById('stat-progress').innerText = db.filter(x => x.status === 'In Progress').length;
-    document.getElementById('stat-done').innerText = db.filter(x => x.status === 'Selesai').length;
-
-    const containerAktif = document.getElementById('listAktif');
-    const containerDone = document.getElementById('listDone');
-    containerAktif.innerHTML = "";
-    containerDone.innerHTML = "";
-
-    // 2. Kelompokkan Data Berdasarkan Bulan
-    const groupByMonth = (data) => {
-        return data.reduce((acc, item) => {
-            const date = new Date(item.waktuInput);
-            const monthYear = date.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
-            if (!acc[monthYear]) acc[monthYear] = [];
-            acc[monthYear].push(item);
-            return acc;
-        }, {});
-    };
-
-    const filteredData = db.filter(t => 
-        !query || t.masalah.toLowerCase().includes(query) || t.pekerja.toLowerCase().includes(query)
-    ).sort((a, b) => new Date(b.waktuInput) - new Date(a.waktuInput));
-
-    const grouped = groupByMonth(filteredData);
-
-    // 3. Render ke HTML
-    for (const month in grouped) {
-        // ... (Logika render header divider bulan tetap sama) ...
-        
-        grouped[month].forEach(t => {
-            const html = createCompactHTML(t); // Menggunakan fungsi helper yang sudah kita buat
-
-            if(t.status === 'Selesai') {
-                containerDone.innerHTML += html;
-            } else {
-                containerAktif.innerHTML += html;
-                
-                // --- DI SINI TEMPATNYA ---
-                if(t.status === 'In Progress' && t.waktuMulai) {
-                    // Berikan delay 50ms agar ID timer-xxxx muncul dulu di DOM
-                    setTimeout(() => {
-                        startLiveTimer(t.id, t.waktuMulai);
-                    }, 50);
-                }
-                // -------------------------
-            }
-        });
-    }
-}
-
-// Helper Function untuk Template HTML
-function createCompactHTML(t) {
-    const badgeClass = t.status === 'Pending' ? 'badge-pending' : (t.status === 'In Progress' ? 'badge-progress' : 'badge-done');
-    
-    const listTemuan = t.riwayat && t.riwayat.length > 0 
-        ? t.riwayat.map(r => `<div style="margin-bottom:2px;">• <span class="time-value">${r.time}</span>: ${r.note}</div>`).join("") 
-        : "<span style='color:#ccc'>Tidak ada detail temuan</span>";
-
-    // Format Waktu Mulai Lengkap (Contoh: 18/02/2026, 14.45)
-    const startTimeStr = t.waktuMulai ? new Date(t.waktuMulai).toLocaleString('id-ID', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}).replace(/\./g, ':') : '-';
-
-    return `
-        <div class="compact-card">
-            <div class="compact-header">
-                <div style="flex: 1;">
-                    <div style="font-weight: 800; color: var(--meratus-navy); font-size: 0.9rem; line-height:1.2;">${t.masalah}</div>
-                    <div style="font-size: 0.7rem; color: #666; margin-top:2px;">👷 ${t.pekerja}</div>
-                </div>
-                <span class="status-badge ${badgeClass}" style="font-size:0.6rem; padding: 2px 8px;">${t.status}</span>
-            </div>
-
-            <div class="compact-content">
-                <div class="info-box box-temuan" style="margin-bottom:4px;">
-                    <strong style="font-size:0.6rem; color:#888; display:block;">DETAIL TEMUAN & WAKTU CEK:</strong>
-                    <div style="font-size:0.75rem; line-height:1.4;">${listTemuan}</div>
-                </div>
-                
-                ${t.status === 'Selesai' && t.keteranganSelesai ? `
-                <div class="info-box box-hasil" style="margin-bottom:4px;">
-                    <strong style="font-size:0.6rem; color:#2e7d32; display:block;">KETERANGAN HASIL KERJA:</strong>
-                    <div style="font-size:0.75rem;">${t.keteranganSelesai}</div>
-                </div>` : ''}
-
-                <div class="compact-grid-info">
-                    <div style="margin-bottom: 2px;">
-                        <span class="time-label">MULAI KERJA:</span>
-                        <span class="time-value">${startTimeStr}</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div id="container-timer-${t.id}">
-                            <span class="time-label">DURASI:</span>
-                            <span id="timer-${t.id}" class="${t.status === 'In Progress' ? 'timer-running' : 'time-value'}" style="font-size:0.75rem;">
-                                ${t.status === 'Selesai' ? calculateDuration(t.waktuMulai, t.waktuSelesai) : '0j 0m 0s'}
-                            </span>
-                        </div>
-                        <div style="display:flex; gap:8px;">
-                            ${t.fotoCek ? `<span onclick="viewImg('${t.fotoCek}')" style="cursor:pointer; font-size:0.7rem; color:var(--accent); font-weight:bold;">🖼️ CEK</span>` : ''}
-                            ${t.fotoSelesai ? `<span onclick="viewImg('${t.fotoSelesai}')" style="cursor:pointer; font-size:0.7rem; color:var(--success); font-weight:bold;">🖼️ HASIL</span>` : ''}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div style="display:flex; gap:4px; margin-top:8px; border-top: 1px solid #eee; padding-top:8px;">
-                ${t.status === 'Pending' ? `<button class="btn-tool" style="flex:1; padding:6px; background:var(--meratus-navy); color:white;" onclick="updateStatus(${t.id}, 'In Progress')">MULAI SEKARANG</button>` : ''}
-                ${t.status === 'In Progress' ? `<button class="btn-tool" style="flex:1; padding:6px; background:var(--meratus-red); color:white" onclick="openFinishModal(${t.id})">KONFIRMASI SELESAI</button>` : ''}
-                <button class="btn-tool" style="width:35px; padding:6px; border:none; color:#ccc;" onclick="if(confirm('Hapus laporan ini?')) hapusData(${t.id})">🗑️</button>
-            </div>
-        </div>
-    `;
-}
-
-    function updateStatus(id, newStatus) {
-        let db = JSON.parse(localStorage.getItem('meratus_db_v4'));
-        const i = db.findIndex(x => x.id === id);
-        db[i].status = newStatus;
-        if(newStatus === 'In Progress') db[i].waktuMulai = new Date().toISOString();
-        localStorage.setItem('meratus_db_v4', JSON.stringify(db));
-        renderDashboard();
+    function startLiveTimer(taskId, startTime) {
+        if(timerIntervals[taskId]) clearInterval(timerIntervals[taskId]);
+        timerIntervals[taskId] = setInterval(() => {
+            const el = document.getElementById(`timer-${taskId}`);
+            if(el) el.innerText = calculateDuration(startTime, new Date());
+            else clearInterval(timerIntervals[taskId]);
+        }, 1000);
     }
 
-    function openFinishModal(id) {
-        selectedTaskId = id;
-        document.getElementById('modalFinish').style.display = 'block';
+    function switchTab(id, el) {
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById('tab-' + id).classList.add('active');
+        el.classList.add('active');
+        if(id === 'dashboard') renderDashboard();
     }
 
-    function closeModal() {
-        document.getElementById('modalFinish').style.display = 'none';
-        base64Selesai = "";
-        document.getElementById('prevSelesai').style.display = 'none';
-        document.getElementById('ketSelesai').value = ""; 
+    function updatePekerja() {
+        const tim = document.getElementById('tim').value;
+        const n = document.getElementById('nama');
+        n.innerHTML = '<option value="">-- Pilih Nama --</option>';
+        if(tim) timData[tim].forEach(p => n.innerHTML += `<option value="${p}">${p}</option>`);
     }
 
-    function confirmFinish() {
-        if(!base64Selesai) return alert("Harap upload foto hasil kerja!");
-        let db = JSON.parse(localStorage.getItem('meratus_db_v4'));
-        const i = db.findIndex(x => x.id === selectedTaskId);
-        
-        db[i].status = 'Selesai';
-        db[i].waktuSelesai = new Date().toISOString();
-        db[i].fotoSelesai = base64Selesai;
-        db[i].keteranganSelesai = document.getElementById('ketSelesai').value; 
-        
-        localStorage.setItem('meratus_db_v4', JSON.stringify(db));
-        if(timerIntervals[selectedTaskId]) clearInterval(timerIntervals[selectedTaskId]);
-        closeModal();
-        renderDashboard();
-    }
-
-    function hapusData(id) {
-        if(confirm("Hapus data ini?")) {
-            let db = JSON.parse(localStorage.getItem('meratus_db_v4'));
-            db = db.filter(x => x.id !== id);
-            localStorage.setItem('meratus_db_v4', JSON.stringify(db));
-            if(timerIntervals[id]) clearInterval(timerIntervals[id]);
-            renderDashboard();
-        }
-    }
-
-    function viewImg(base64) {
-        const w = window.open("");
-        w.document.write(`<body style="margin:0; background:#000; display:flex; align-items:center; justify-content:center;"><img src="${base64}" style="max-width:100%; max-height:100vh;"></body>`);
-    }
-
-function exportToExcel() {
-    const db = JSON.parse(localStorage.getItem('meratus_db_v4')) || [];
-    if(db.length === 0) return alert("Data kosong!");
-    
-    const wsData = db.map((t, i) => {
-        const detailTemuan = t.riwayat && t.riwayat.length > 0 
-            ? t.riwayat.map(r => `[${r.time}] ${r.note}`).join(" | ") 
-            : "-";
-
-        return {
-            "No": i + 1,
-            "Masalah": t.masalah,
-            "Detail Temuan (CEK)": detailTemuan,
-            "Pekerja": t.pekerja,
-            "Status": t.status,
-            "Waktu Mulai": t.waktuMulai ? new Date(t.waktuMulai).toLocaleString('id-ID') : "-",
-            "Waktu Selesai": t.waktuSelesai ? new Date(t.waktuSelesai).toLocaleString('id-ID') : "-",
-            "Durasi": calculateDuration(t.waktuMulai, t.waktuSelesai),
-            "Keterangan Selesai": t.keteranganSelesai || "-" 
-        };
-    });
-
-    const ws = XLSX.utils.json_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Laporan");
-    XLSX.writeFile(wb, `Laporan_Meratus_${Date.now()}.xlsx`);
-}
-
-function exportToPDF() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('l', 'mm', 'a4'); 
-    const db = JSON.parse(localStorage.getItem('meratus_db_v4')) || [];
-    
-    doc.setFontSize(16);
-    doc.text("LAPORAN MAINTENANCE MERATUS", 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Dicetak pada: ${new Date().toLocaleString()}`, 14, 28);
-
-    const rows = db.map((t, i) => {
-        const detailTemuan = t.riwayat && t.riwayat.length > 0 
-            ? t.riwayat.map(r => `${r.time}: ${r.note}`).join("\n") 
-            : "-";
-
-        return [
-            i + 1,
-            t.masalah,
-            detailTemuan,
-            t.pekerja,
-            t.status,
-            t.waktuMulai ? new Date(t.waktuMulai).toLocaleString('id-ID') : "-",
-            t.waktuSelesai ? new Date(t.waktuSelesai).toLocaleString('id-ID') : "-",
-            calculateDuration(t.waktuMulai, t.waktuSelesai),
-            t.keteranganSelesai || "-" 
-        ];
-    });
-
-    doc.autoTable({
-        head: [['No', 'Masalah', 'Detail Temuan', 'Pekerja', 'Status', 'Mulai', 'Selesai', 'Durasi', 'Ket. Selesai']],
-        body: rows,
-        startY: 35,
-        theme: 'grid',
-        headStyles: { fillColor: [26, 58, 90] },
-        styles: { fontSize: 7, overflow: 'linebreak' },
-        columnStyles: { 
-            2: { cellWidth: 35 }, 
-            8: { cellWidth: 30 }  
-        }
-    });
-
-    doc.save(`Laporan_Maintenance_${Date.now()}.pdf`);
-}
-
-    function exportData() {
-        const data = localStorage.getItem('meratus_db_v4');
-        const blob = new Blob([data], {type: 'application/json'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `Backup_${Date.now()}.json`;
-        a.click();
-    }
-
-    function importData(event) {
-        const file = event.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            localStorage.setItem('meratus_db_v4', e.target.result);
-            alert("Import berhasil!");
-            location.reload();
-        };
-        reader.readAsText(file);
-    }
+    function openFinishModal(id) { selectedTaskId = id; document.getElementById('modalFinish').style.display = 'block'; }
+    function closeModal() { document.getElementById('modalFinish').style.display = 'none'; }
+    function viewImg(base64) { const w = window.open(""); w.document.write(`<body style="margin:0; background:#000; display:flex; align-items:center; justify-content:center;"><img src="${base64}" style="max-width:100%; max-height:100vh;"></body>`); }
 
     setInterval(() => {
         const clockEl = document.getElementById('realtime-clock');
         if(clockEl) clockEl.innerText = new Date().toLocaleString('id-ID');
     }, 1000);
 
-    renderRequests();
-function startLiveTimer(taskId, startTime) {
-    // Bersihkan interval lama jika ada untuk menghindari double-timer (bikin boros/error)
-    if(timerIntervals[taskId]) clearInterval(timerIntervals[taskId]);
-    
-    timerIntervals[taskId] = setInterval(() => {
-        const el = document.getElementById(`timer-${taskId}`);
-        if(el) {
-            // Hitung selisih waktu sekarang dengan waktu mulai
-            el.innerText = calculateDuration(startTime, new Date());
-        } else {
-            // Jika pindah tab/elemen hilang, matikan interval
-            clearInterval(timerIntervals[taskId]);
-        }
-    }, 1000);
-}
+    // Jalankan Sinkronisasi Pertama Kali
+    loadAllData();
+
 </script>
 </body>
+
 </html>
